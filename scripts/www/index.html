@@ -187,6 +187,11 @@
             border-radius: 50%;
             box-shadow: inset 0 0 20px rgba(0,0,0,0.8), 0 0 10px rgba(34,211,238,0.2);
         }
+        
+        /* Dark mode filter for map tiles */
+        .leaflet-tile {
+            filter: invert(100%) hue-rotate(180deg) brightness(90%) contrast(90%);
+        }
 
         .dev-menu {
             position: absolute;
@@ -213,7 +218,7 @@
         .dev-menu button:hover { background: #4b5563; }
     </style>
 </head>
-<body>
+<body onload="loadSettings()">
 
     <div class="dev-menu">
         <div class="text-xs text-gray-400 mb-2 uppercase font-bold tracking-wider">切换界面 (1-7)</div>
@@ -229,18 +234,6 @@
 
     <div class="app-container" id="app">
         
-        <!-- Android Hardware Elements -->
-        <div class="android-status-bar">
-            <span>12:00</span>
-            <div class="flex gap-2 items-center">
-                <i class="fa-solid fa-wifi text-[10px]"></i>
-                <i class="fa-solid fa-signal text-[10px]"></i>
-                <i class="fa-solid fa-battery-full text-[10px]"></i>
-                <span>100%</span>
-            </div>
-        </div>
-        <div class="hole-punch"></div>
-
         <!-- Toast Container -->
         <div id="toast" class="toast-msg">刀盾目前没有资金购买这些载具QAQ</div>
         
@@ -301,7 +294,7 @@
                         <div class="absolute left-0 -top-1 w-[1px] h-2 bg-gray-400"></div>
                         <div class="absolute right-0 -top-1 w-[1px] h-2 bg-gray-400"></div>
                     </div>
-                    AHRS + PDR Map
+                    AHRS + PDR Map (North Up)
                 </div>
             </div>
             <div class="px-4 pb-6 flex flex-col gap-4 z-20">
@@ -566,21 +559,21 @@
                     </div>
                     <div class="space-y-3">
                         <label class="flex items-center gap-3 p-2 rounded-lg bg-white/5 border border-cyan-500/30">
-                            <input type="radio" name="attitude" class="text-cyan-500 bg-gray-800 border-gray-600 focus:ring-cyan-500 h-4 w-4">
+                            <input type="radio" name="attitude" value="ekf" onchange="saveSettings()" class="text-cyan-500 bg-gray-800 border-gray-600 focus:ring-cyan-500 h-4 w-4">
                             <div class="flex-1">
                                 <div class="text-sm text-white">扩展卡尔曼滤波 (EKF)</div>
                                 <div class="text-[10px] text-gray-400">高精度，计算量大，抗噪好</div>
                             </div>
                         </label>
                         <label class="flex items-center gap-3 p-2 rounded-lg hover:bg-white/5 transition-colors">
-                            <input type="radio" name="attitude" checked class="text-cyan-500 bg-gray-800 border-gray-600 focus:ring-cyan-500 h-4 w-4">
+                            <input type="radio" name="attitude" value="madgwick" checked onchange="saveSettings()" class="text-cyan-500 bg-gray-800 border-gray-600 focus:ring-cyan-500 h-4 w-4">
                             <div class="flex-1">
                                 <div class="text-sm text-white">Madgwick 滤波</div>
                                 <div class="text-[10px] text-gray-400">实时性强，适用于移动设备计算</div>
                             </div>
                         </label>
                         <label class="flex items-center gap-3 p-2 rounded-lg hover:bg-white/5 transition-colors">
-                            <input type="radio" name="attitude" class="text-cyan-500 bg-gray-800 border-gray-600 focus:ring-cyan-500 h-4 w-4">
+                            <input type="radio" name="attitude" value="mahony" onchange="saveSettings()" class="text-cyan-500 bg-gray-800 border-gray-600 focus:ring-cyan-500 h-4 w-4">
                             <div class="flex-1">
                                 <div class="text-sm text-white">Mahony 滤波</div>
                                 <div class="text-[10px] text-gray-400">经典互补滤波，包含PI控制</div>
@@ -596,14 +589,14 @@
                     </div>
                     <div class="space-y-3">
                         <label class="flex items-center gap-3 p-2 rounded-lg hover:bg-white/5 transition-colors">
-                            <input type="radio" name="stride" class="text-cyan-500 bg-gray-800 border-gray-600 h-4 w-4">
+                            <input type="radio" name="stride" value="weinberg" onchange="saveSettings()" class="text-cyan-500 bg-gray-800 border-gray-600 h-4 w-4">
                             <div class="flex-1">
                                 <div class="text-sm text-white">Weinberg 模型</div>
                                 <div class="text-[10px] text-gray-400">基于垂直加速度最大最小差值</div>
                             </div>
                         </label>
                         <label class="flex items-center gap-3 p-2 rounded-lg bg-white/5 border border-cyan-500/30">
-                            <input type="radio" name="stride" checked class="text-cyan-500 bg-gray-800 border-gray-600 h-4 w-4">
+                            <input type="radio" name="stride" value="kim" checked onchange="saveSettings()" class="text-cyan-500 bg-gray-800 border-gray-600 h-4 w-4">
                             <div class="flex-1">
                                 <div class="text-sm text-white">Kim 模型</div>
                                 <div class="text-[10px] text-gray-400">基于加速度均值，平滑性较好</div>
@@ -621,13 +614,13 @@
                         <span>加速度方差阈值</span>
                         <span id="accel-var-val" class="text-white font-tech">0.15 m/s²</span>
                     </div>
-                    <input id="accel-var-range" type="range" min="0" max="100" value="15" class="w-full h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer mb-4 accent-cyan-500" oninput="document.getElementById('accel-var-val').innerText = (this.value/100).toFixed(2) + ' m/s²'">
+                    <input id="accel-var-range" type="range" min="0" max="100" value="15" class="w-full h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer mb-4 accent-cyan-500" oninput="document.getElementById('accel-var-val').innerText = (this.value/100).toFixed(2) + ' m/s²'" onchange="saveSettings()">
                     
                     <div class="mb-2 flex justify-between text-xs text-gray-400">
                         <span>角速度幅值阈值</span>
                         <span id="gyro-mag-val" class="text-white font-tech">0.40 rad/s</span>
                     </div>
-                    <input id="gyro-mag-range" type="range" min="0" max="100" value="40" class="w-full h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-cyan-500" oninput="document.getElementById('gyro-mag-val').innerText = (this.value/100).toFixed(2) + ' rad/s'">
+                    <input id="gyro-mag-range" type="range" min="0" max="100" value="40" class="w-full h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-cyan-500" oninput="document.getElementById('gyro-mag-val').innerText = (this.value/100).toFixed(2) + ' rad/s'" onchange="saveSettings()">
                 </div>
 
                 <!-- Section 4: Magnetometer -->
@@ -638,7 +631,7 @@
                     </div>
                     <!-- Toggle Switch -->
                     <div class="relative inline-block w-10 mr-2 align-middle select-none transition duration-200 ease-in">
-                        <input type="checkbox" name="toggle" id="toggle1" checked class="toggle-checkbox absolute block w-5 h-5 rounded-full bg-white border-4 border-gray-600 appearance-none cursor-pointer z-10 transition-all duration-300"/>
+                        <input type="checkbox" name="toggle" id="toggle1" checked onchange="saveSettings()" class="toggle-checkbox absolute block w-5 h-5 rounded-full bg-white border-4 border-gray-600 appearance-none cursor-pointer z-10 transition-all duration-300"/>
                         <label for="toggle1" class="toggle-label block overflow-hidden h-5 rounded-full bg-gray-600 cursor-pointer transition-colors duration-300"></label>
                     </div>
                 </div>
@@ -798,7 +791,7 @@
         // Level 3: AHRS Matrix
         let euler = { alpha: 0, beta: 0, gamma: 0 };
         
-        let historyData = [];
+        let historyData = JSON.parse(localStorage.getItem('pdr_history')) || [];
 
         function initMaps() {
             if(!map) {
@@ -834,15 +827,27 @@
             }
             
             // Try get real location
-            if (navigator.geolocation && latlngs.length === 0) {
+            if (navigator.geolocation && latlngs.length <= 1) {
                 navigator.geolocation.getCurrentPosition(pos => {
                     currentLat = pos.coords.latitude;
                     currentLng = pos.coords.longitude;
                     map.setView([currentLat, currentLng], 19);
-                    currentMarker.setLatLng([currentLat, currentLng]);
                     latlngs = [[currentLat, currentLng]];
                     trajectoryPolyline.setLatLngs(latlngs);
-                }, () => {}, {enableHighAccuracy: true});
+                }, () => {
+                    // Fallback to last known history location if available
+                    if (historyData.length > 0) {
+                        const lastRecord = historyData[0];
+                        if (lastRecord.points && lastRecord.points.length > 0) {
+                            const lastPoint = lastRecord.points[lastRecord.points.length - 1];
+                            currentLat = lastPoint[0];
+                            currentLng = lastPoint[1];
+                            map.setView([currentLat, currentLng], 19);
+                            latlngs = [[currentLat, currentLng]];
+                            trajectoryPolyline.setLatLngs(latlngs);
+                        }
+                    }
+                }, {enableHighAccuracy: true});
             } else if (latlngs.length === 0) {
                 latlngs = [[currentLat, currentLng]];
             }
@@ -898,6 +903,11 @@
                 
                 let headingElem = document.getElementById('posture-heading');
                 if (headingElem) headingElem.innerText = Math.round(heading);
+                
+                const mapWrapper = document.getElementById('map-wrapper');
+                if (mapWrapper) {
+                    mapWrapper.style.transform = `translate(-50%, -50%) rotate(${-heading}deg)`;
+                }
                 
                 updateCompassUI(heading, event.beta, event.gamma);
             }
@@ -1039,6 +1049,7 @@
                 distKm: distKm,
                 points: [...latlngs]
             });
+            localStorage.setItem('pdr_history', JSON.stringify(historyData));
             renderHistory();
         }
 
@@ -1095,6 +1106,69 @@
             
             showScreen('screen-history-detail');
         }
+
+        function loadSettings() {
+            const settings = JSON.parse(localStorage.getItem('pdr_settings'));
+            if (settings) {
+                if (settings.attitude) {
+                    const el = document.querySelector(`input[name="attitude"][value="${settings.attitude}"]`);
+                    if (el) el.checked = true;
+                }
+                if (settings.stride) {
+                    const el = document.querySelector(`input[name="stride"][value="${settings.stride}"]`);
+                    if (el) el.checked = true;
+                }
+                if (settings.accelVar) {
+                    const range = document.getElementById('accel-var-range');
+                    range.value = settings.accelVar;
+                    document.getElementById('accel-var-val').innerText = (settings.accelVar/100).toFixed(2) + ' m/s²';
+                }
+                if (settings.gyroMag) {
+                    const range = document.getElementById('gyro-mag-range');
+                    range.value = settings.gyroMag;
+                    document.getElementById('gyro-mag-val').innerText = (settings.gyroMag/100).toFixed(2) + ' rad/s';
+                }
+                if (settings.magToggle !== undefined) {
+                    document.getElementById('toggle1').checked = settings.magToggle;
+                }
+            }
+            // Load history data for UI initially
+            if (historyData.length > 0) {
+                renderHistory();
+            }
+        }
+        
+        function saveSettings() {
+            const settings = {
+                attitude: document.querySelector('input[name="attitude"]:checked')?.value || 'madgwick',
+                stride: document.querySelector('input[name="stride"]:checked')?.value || 'kim',
+                accelVar: document.getElementById('accel-var-range').value,
+                gyroMag: document.getElementById('gyro-mag-range').value,
+                magToggle: document.getElementById('toggle1').checked
+            };
+            localStorage.setItem('pdr_settings', JSON.stringify(settings));
+        }
+
+        // --- Auto Save on Exit ---
+        window.addEventListener('beforeunload', function() {
+            if (steps > 0 || latlngs.length > 1) {
+                saveToHistory();
+            }
+        });
+        document.addEventListener('visibilitychange', function() {
+            if (document.visibilityState === 'hidden' && (steps > 0 || latlngs.length > 1)) {
+                // Also try to save when app goes to background
+                saveToHistory();
+                // Reset session variables so if user returns, it's a new session,
+                // but keep currentLat/currentLng so it starts from the last known point
+                steps = 0;
+                distance = 0;
+                latlngs = [[currentLat, currentLng]];
+                startTime = Date.now();
+                if (map) trajectoryPolyline.setLatLngs(latlngs);
+                updateStatsUI();
+            }
+        });
 
         // --- Mode Selection Logic ---
         function handleModeChange(selectElement) {
