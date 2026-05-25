@@ -81,6 +81,10 @@
             border-radius: 2px;
         }
 
+        .dark-map-tiles {
+            filter: invert(100%) hue-rotate(180deg) brightness(80%) contrast(120%) grayscale(80%);
+        }
+
         .safe-area-top { height: 32px; width: 100%; }
         .safe-area-bottom { height: 24px; width: 100%; }
 
@@ -289,6 +293,12 @@
             </div>
             <div class="flex-1 relative mt-4 mx-4 mb-4 rounded-3xl overflow-hidden border border-white/5 bg-[#0a0f18] grid-bg">
                 <div id="map" class="w-full h-full absolute inset-0 z-0"></div>
+                
+                <!-- Locate Button -->
+                <button onclick="locateCurrentPosition()" class="absolute bottom-12 right-3 w-10 h-10 bg-gray-800/80 backdrop-blur-md rounded-full border border-white/10 flex items-center justify-center text-cyan-400 z-10 shadow-lg hover:bg-gray-700/80 transition-colors">
+                    <i class="fa-solid fa-location-crosshairs text-lg"></i>
+                </button>
+
                 <div class="absolute bottom-3 right-3 bg-black/40 backdrop-blur-sm px-2 py-1 rounded text-[10px] text-gray-400 border border-white/10 flex items-center gap-2 z-10 pointer-events-none">
                     <div class="w-10 h-[1px] bg-gray-400 relative">
                         <div class="absolute left-0 -top-1 w-[1px] h-2 bg-gray-400"></div>
@@ -479,7 +489,7 @@
 
                 <!-- Fixed Bottom Button -->
                 <div class="p-6 pt-2 bg-gradient-to-t from-[#050B14] to-transparent z-10">
-                    <button class="w-full py-3.5 rounded-full bg-transparent border border-blue-500 text-blue-400 font-bold text-sm shadow-[inset_0_0_10px_rgba(59,130,246,0.1)] flex justify-center items-center gap-2 md-ripple">
+                    <button onclick="exportAllHistoryCSV()" class="w-full py-3.5 rounded-full bg-transparent border border-blue-500 text-blue-400 font-bold text-sm shadow-[inset_0_0_10px_rgba(59,130,246,0.1)] flex justify-center items-center gap-2 md-ripple">
                         <i class="fa-solid fa-download"></i> 导出全部CSV
                     </button>
                 </div>
@@ -532,7 +542,7 @@
                     </div>
                 </div>
 
-                <button class="w-full mt-2 py-3 rounded-xl bg-blue-600/20 border border-blue-500/50 text-blue-400 font-bold text-sm hover:bg-blue-600/30 transition-colors md-ripple flex items-center justify-center gap-2">
+                <button onclick="exportSingleHistoryCSV()" class="w-full mt-2 py-3 rounded-xl bg-blue-600/20 border border-blue-500/50 text-blue-400 font-bold text-sm hover:bg-blue-600/30 transition-colors md-ripple flex items-center justify-center gap-2">
                     <i class="fa-solid fa-share-nodes"></i> 导出单条数据
                 </button>
             </div>
@@ -588,6 +598,13 @@
                         <i class="fa-solid fa-shoe-prints"></i> 步长估算模型 (Stride)
                     </div>
                     <div class="space-y-3">
+                        <label class="flex items-center gap-3 p-2 rounded-lg bg-white/5 border border-cyan-500/30">
+                            <input type="radio" name="stride" value="horizontal" checked onchange="saveSettings()" class="text-cyan-500 bg-gray-800 border-gray-600 focus:ring-cyan-500 h-4 w-4">
+                            <div class="flex-1">
+                                <div class="text-sm text-white">水平合加速度模型</div>
+                                <div class="text-[10px] text-gray-400">基于导航系水平加速度极差 (推荐)</div>
+                            </div>
+                        </label>
                         <label class="flex items-center gap-3 p-2 rounded-lg hover:bg-white/5 transition-colors">
                             <input type="radio" name="stride" value="weinberg" onchange="saveSettings()" class="text-cyan-500 bg-gray-800 border-gray-600 h-4 w-4">
                             <div class="flex-1">
@@ -595,8 +612,8 @@
                                 <div class="text-[10px] text-gray-400">基于垂直加速度最大最小差值</div>
                             </div>
                         </label>
-                        <label class="flex items-center gap-3 p-2 rounded-lg bg-white/5 border border-cyan-500/30">
-                            <input type="radio" name="stride" value="kim" checked onchange="saveSettings()" class="text-cyan-500 bg-gray-800 border-gray-600 h-4 w-4">
+                        <label class="flex items-center gap-3 p-2 rounded-lg hover:bg-white/5 transition-colors">
+                            <input type="radio" name="stride" value="kim" onchange="saveSettings()" class="text-cyan-500 bg-gray-800 border-gray-600 h-4 w-4">
                             <div class="flex-1">
                                 <div class="text-sm text-white">Kim 模型</div>
                                 <div class="text-[10px] text-gray-400">基于加速度均值，平滑性较好</div>
@@ -779,8 +796,8 @@
         let startTime = Date.now();
 
         // Level 2: Adaptive Step Length (Weinberg)
-        let aMax = -999;
-        let aMin = 999;
+        let aVertMax = -999, aVertMin = 999;
+        let aHorizMax = -999, aHorizMin = 999;
         let weinbergK = 0.41; 
         
         let lastAccelZ = 0;
@@ -795,16 +812,53 @@
 
         function initMaps() {
             if(!map) {
-                map = L.map('map', { zoomControl: false, attributionControl: false }).setView([currentLat, currentLng], 19);
-                // Faster map tiles
-                L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { 
+                // Initialize map with extreme performance optimizations
+                map = L.map('map', { 
+                    zoomControl: false, 
+                    attributionControl: false,
+                    preferCanvas: true, // Use Canvas instead of SVG for better performance
+                    fadeAnimation: false, // 禁用淡入动画，直接显示
+                    zoomAnimation: true,
+                    markerZoomAnimation: true,
+                    inertia: true,
+                    inertiaDeceleration: 3000, // 更平滑的惯性滚动
+                    zoomSnap: 0.1, // 允许小数点级别的缩放
+                    zoomDelta: 0.1
+                }).setView([currentLat, currentLng], 19);
+                
+                // 使用国内高德地图作为底图，进一步优化加载策略
+                L.tileLayer('http://wprd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&style=7&x={x}&y={y}&z={z}', {
+                    subdomains: ['1', '2', '3', '4'],
                     maxZoom: 22,
-                    keepBuffer: 4,
-                    updateWhenIdle: true,
-                    updateWhenZooming: false
+                    maxNativeZoom: 18, 
+                    keepBuffer: 16,     // 极限增加缓冲区，提前下载两倍屏幕的区块
+                    updateWhenIdle: false, // 移动中持续更新
+                    updateWhenZooming: true, // 缩放中持续更新
+                    updateInterval: 16, // 降低更新检查间隔到 16ms (约60fps)
+                    className: 'dark-map-tiles',
+                    crossOrigin: true // 允许跨域，利用浏览器缓存机制
                 }).addTo(map);
-                trajectoryPolyline = L.polyline([], {color: '#22d3ee', weight: 4, opacity: 0.8}).addTo(map);
-                currentMarker = L.circleMarker([currentLat, currentLng], { color: '#ef4444', fillColor: '#ef4444', fillOpacity: 1, radius: 6 }).addTo(map);
+                
+                // Use smoother polyline rendering
+                trajectoryPolyline = L.polyline([], {
+                    color: '#22d3ee', 
+                    weight: 4, 
+                    opacity: 0.8,
+                    smoothFactor: 1 // Optimize polyline rendering
+                }).addTo(map);
+                
+                const userIcon = L.divIcon({
+                    className: '',
+                    html: `
+                        <div id="user-arrow-container" style="position: relative; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; transform: rotate(0deg); transition: transform 0.1s ease-out;">
+                            <div style="position: absolute; top: -4px; width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent; border-bottom: 12px solid #3b82f6;"></div>
+                            <div style="width: 12px; height: 12px; background-color: #ef4444; border-radius: 50%; border: 2px solid white; z-index: 1;"></div>
+                        </div>
+                    `,
+                    iconSize: [24, 24],
+                    iconAnchor: [12, 12]
+                });
+                currentMarker = L.marker([currentLat, currentLng], { icon: userIcon }).addTo(map);
                 
                 // Allow setting custom start point
                 map.on('click', function(e) {
@@ -819,9 +873,33 @@
                 });
             }
             if(!detailMap) {
-                detailMap = L.map('detail-map', { zoomControl: false, attributionControl: false }).setView([currentLat, currentLng], 19);
-                L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom: 22 }).addTo(detailMap);
-                detailPolyline = L.polyline([], {color: '#22d3ee', weight: 4, opacity: 0.8}).addTo(detailMap);
+                detailMap = L.map('detail-map', { 
+                    zoomControl: false, 
+                    attributionControl: false,
+                    preferCanvas: true,
+                    fadeAnimation: false,
+                    inertia: true,
+                    inertiaDeceleration: 3000,
+                    zoomSnap: 0.1,
+                    zoomDelta: 0.1
+                }).setView([currentLat, currentLng], 19);
+                L.tileLayer('http://wprd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&style=7&x={x}&y={y}&z={z}', { 
+                    subdomains: ['1', '2', '3', '4'],
+                    maxZoom: 22, 
+                    maxNativeZoom: 18,
+                    keepBuffer: 16,
+                    updateWhenIdle: false,
+                    updateWhenZooming: true,
+                    updateInterval: 16,
+                    className: 'dark-map-tiles',
+                    crossOrigin: true
+                }).addTo(detailMap);
+                detailPolyline = L.polyline([], {
+                    color: '#22d3ee', 
+                    weight: 4, 
+                    opacity: 0.8,
+                    smoothFactor: 1
+                }).addTo(detailMap);
                 detailStartMarker = L.circleMarker([0,0], { color: '#64748b', fillColor: '#64748b', fillOpacity: 1, radius: 5 }).addTo(detailMap);
                 detailEndMarker = L.circleMarker([0,0], { color: '#ef4444', fillColor: '#ef4444', fillOpacity: 1, radius: 5 }).addTo(detailMap);
             }
@@ -850,6 +928,19 @@
                 }, {enableHighAccuracy: true});
             } else if (latlngs.length === 0) {
                 latlngs = [[currentLat, currentLng]];
+            }
+        }
+
+        function locateCurrentPosition() {
+            if (map && currentLat && currentLng) {
+                // Fly to current position with appropriate zoom level
+                map.flyTo([currentLat, currentLng], 19, {
+                    animate: true,
+                    duration: 0.8 // smooth animation duration
+                });
+                showToast("已定位到当前位置");
+            } else {
+                showToast("无法获取当前位置");
             }
         }
 
@@ -904,9 +995,9 @@
                 let headingElem = document.getElementById('posture-heading');
                 if (headingElem) headingElem.innerText = Math.round(heading);
                 
-                const mapWrapper = document.getElementById('map-wrapper');
-                if (mapWrapper) {
-                    mapWrapper.style.transform = `translate(-50%, -50%) rotate(${-heading}deg)`;
+                const arrowContainer = document.getElementById('user-arrow-container');
+                if (arrowContainer) {
+                    arrowContainer.style.transform = `rotate(${heading}deg)`;
                 }
                 
                 updateCompassUI(heading, event.beta, event.gamma);
@@ -916,30 +1007,75 @@
         function handleMotion(event) {
             if (!isTracking) return;
             let accG = event.accelerationIncludingGravity;
+            let gyro = event.rotationRate;
+            
             if (accG) {
-                let z = accG.z / 9.81;
+                // 1. MEMS 原始数据 (Body Frame)
+                let ax = accG.x || 0;
+                let ay = accG.y || 0;
+                let az = accG.z || 0;
+                
+                let gx = gyro ? (gyro.alpha || 0) : 0;
+                let gy = gyro ? (gyro.beta || 0) : 0;
+                let gz = gyro ? (gyro.gamma || 0) : 0;
+                
+                // 更新实时图表
+                if (document.getElementById('screen-sensors').classList.contains('active')) {
+                    updateCharts(ax, ay, az, gx, gy, gz);
+                }
+                
+                // 2. 姿态解算 & 转换到导航坐标系 (Navigation Frame)
+                let R = getRotationMatrix(euler.alpha, euler.beta, euler.gamma);
+                let a_earth_x = R[0][0]*ax + R[0][1]*ay + R[0][2]*az;
+                let a_earth_y = R[1][0]*ax + R[1][1]*ay + R[1][2]*az;
+                let a_earth_z = R[2][0]*ax + R[2][1]*ay + R[2][2]*az;
+                
+                // 计算垂向加速度与水平加速度
+                let a_vert = Math.abs(a_earth_z / 9.81); 
+                let a_horiz = Math.sqrt(a_earth_x*a_earth_x + a_earth_y*a_earth_y) / 9.81;
                 
                 let vaccelElem = document.getElementById('posture-vaccel');
-                if (vaccelElem) vaccelElem.innerText = Math.abs(z).toFixed(2);
+                if (vaccelElem) vaccelElem.innerText = a_vert.toFixed(2);
                 
-                // Track max/min for Weinberg model
-                if (z > aMax) aMax = z;
-                if (z < aMin) aMin = z;
+                // 记录水平加速度的最值 (用于水平加速度模型)
+                if (a_horiz > aHorizMax) aHorizMax = a_horiz;
+                if (a_horiz < aHorizMin) aHorizMin = a_horiz;
+
+                // 记录垂向加速度的最值 (用于Weinberg/Kim模型)
+                if (a_vert > aVertMax) aVertMax = a_vert;
+                if (a_vert < aVertMin) aVertMin = a_vert;
 
                 let now = Date.now();
-                if (Math.abs(z) > stepThreshold && Math.abs(lastAccelZ) <= stepThreshold && (now - lastStepTime) > 300) {
+                // 3. 改进的步伐检测 (基于转换后的垂向加速度)
+                if (a_vert > stepThreshold && lastAccelZ <= stepThreshold && (now - lastStepTime) > 300) {
                     steps++;
                     
-                    // Calculate step frequency
+                    // 计算步频
                     if (lastStepTime > 0) {
                         let dt = now - lastStepTime;
                         stepFreq = Math.round(60000 / dt);
-                        if (stepFreq > 200) stepFreq = 200; // Cap at reasonable max
+                        if (stepFreq > 200) stepFreq = 200; 
                         document.getElementById('stat-freq').innerText = stepFreq;
                     }
                     
-                    // --- Level 2: Adaptive Step Length (Weinberg) ---
-                    let dynamicStepLength = weinbergK * Math.pow(Math.max(0, aMax - aMin), 0.25);
+                    // 4. 基于选定的模型进行步长估计
+                    let dynamicStepLength = 0.5;
+                    const strideModel = document.querySelector('input[name="stride"]:checked')?.value || 'horizontal';
+                    
+                    if (strideModel === 'weinberg') {
+                        // Weinberg 模型: 基于垂直加速度最大最小差值
+                        dynamicStepLength = weinbergK * Math.pow(Math.max(0, aVertMax - aVertMin), 0.25) * 1.5; 
+                    } else if (strideModel === 'kim') {
+                        // Kim 模型: 基于垂直加速度均值，平滑性较好 (示例实现)
+                        let avgAccel = (Math.abs(aVertMax) + Math.abs(aVertMin)) / 2;
+                        let kimK = 0.35; // Kim 模型系数
+                        dynamicStepLength = kimK * Math.cbrt(avgAccel) * 1.5;
+                    } else if (strideModel === 'horizontal') {
+                        // 水平合加速度模型: 基于导航坐标系下水平加速度极差
+                        let horizK = 0.5; // 水平模型经验系数
+                        dynamicStepLength = horizK * Math.pow(Math.max(0, aHorizMax - aHorizMin), 0.25) * 1.5;
+                    }
+                    
                     if (isNaN(dynamicStepLength) || dynamicStepLength < 0.3) dynamicStepLength = 0.5;
                     if (dynamicStepLength > 1.2) dynamicStepLength = 1.2;
                     distance += dynamicStepLength;
@@ -947,20 +1083,13 @@
                     let stepLenElem = document.getElementById('stat-steplen');
                     if (stepLenElem) stepLenElem.innerText = dynamicStepLength.toFixed(2);
                     
-                    // --- Level 3: AHRS Matrix Projection ---
-                    // Here we formally construct the AHRS rotation matrix
-                    let R = getRotationMatrix(euler.alpha, euler.beta, euler.gamma);
-                    // In a full SINS, we'd do: a_Earth = R * a_Body, then double integrate.
-                    // For mobile PDR, it's more stable to use the extracted heading + step vector
-                    // Convert heading to radians
+                    // 5. 行人航向估计
                     let rad = heading * Math.PI / 180;
                     
-                    // Earth frame displacements (dx = East, dy = North)
+                    // 6. 位置更新 (结合步长、航向与步伐事件)
                     let dx = Math.sin(rad) * dynamicStepLength;
                     let dy = Math.cos(rad) * dynamicStepLength;
                     
-                    // --- Level 5: Map Integration ---
-                    // Convert meters to lat/lng degrees (approximate)
                     let dLat = dy / 111320;
                     let dLng = dx / (111320 * Math.cos(currentLat * Math.PI / 180));
                     
@@ -977,12 +1106,12 @@
                     
                     updateStatsUI();
                     
-                    // Reset adaptive window
-                    aMax = -999;
-                    aMin = 999;
+                    // 重置自适应窗口
+                    aVertMax = -999; aVertMin = 999;
+                    aHorizMax = -999; aHorizMin = 999;
                     lastStepTime = now;
                 }
-                lastAccelZ = z;
+                lastAccelZ = a_vert;
             }
         }
 
@@ -1088,7 +1217,10 @@
             });
         }
 
+        let currentDetailId = null;
+
         function viewHistoryDetail(id) {
+            currentDetailId = id;
             const item = historyData.find(i => i.id === id);
             if (!item) return;
             
@@ -1105,6 +1237,56 @@
             }
             
             showScreen('screen-history-detail');
+        }
+
+        function downloadCSV(content, filename) {
+            const blob = new Blob(["\uFEFF" + content], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement("a");
+            const url = URL.createObjectURL(blob);
+            link.setAttribute("href", url);
+            link.setAttribute("download", filename);
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            showToast("导出成功");
+        }
+
+        function exportSingleHistoryCSV() {
+            if (!currentDetailId) return;
+            const item = historyData.find(i => i.id === currentDetailId);
+            if (!item) return;
+            
+            let csvContent = "Time,Duration,Steps,Distance(km),Latitude,Longitude\n";
+            if (item.points && item.points.length > 0) {
+                item.points.forEach(point => {
+                    csvContent += `${item.time},${item.duration},${item.steps},${item.distKm},${point[0]},${point[1]}\n`;
+                });
+            } else {
+                csvContent += `${item.time},${item.duration},${item.steps},${item.distKm},,\n`;
+            }
+            
+            downloadCSV(csvContent, `trajectory_${item.id}.csv`);
+        }
+
+        function exportAllHistoryCSV() {
+            if (historyData.length === 0) {
+                showToast("没有可导出的历史记录");
+                return;
+            }
+            
+            let csvContent = "TrackID,Time,Duration,Steps,Distance(km),Latitude,Longitude\n";
+            historyData.forEach(item => {
+                if (item.points && item.points.length > 0) {
+                    item.points.forEach(point => {
+                        csvContent += `${item.id},${item.time},${item.duration},${item.steps},${item.distKm},${point[0]},${point[1]}\n`;
+                    });
+                } else {
+                    csvContent += `${item.id},${item.time},${item.duration},${item.steps},${item.distKm},,\n`;
+                }
+            });
+            
+            downloadCSV(csvContent, `all_trajectories_${Date.now()}.csv`);
         }
 
         function loadSettings() {
@@ -1200,9 +1382,8 @@
             document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
             document.getElementById(screenId).classList.add('active');
             
-            if (screenId === 'screen-sensors' && !window.chartsInitialized) {
-                initCharts();
-                window.chartsInitialized = true;
+            if (screenId === 'screen-sensors' && !accelChart) {
+                setTimeout(initCharts, 100);
             }
             
             // Fix map rendering when container becomes visible
@@ -1296,8 +1477,8 @@
 
         function restoreDefaults() {
             // Restore Radio buttons
-            document.querySelectorAll('input[name="attitude"]')[1].checked = true; // Madgwick
-            document.querySelectorAll('input[name="stride"]')[1].checked = true; // Kim
+            document.querySelector('input[name="attitude"][value="madgwick"]').checked = true; // Madgwick
+            document.querySelector('input[name="stride"][value="horizontal"]').checked = true; // Horizontal
             
             // Restore Range Inputs
             const accelRange = document.getElementById('accel-var-range');
@@ -1314,23 +1495,70 @@
             showToast('参数已恢复默认设置');
         }
 
+        // Chart references
+        let accelChart, gyroChart;
+        let chartDataPoints = 100;
+        let accelData = { x: new Array(chartDataPoints).fill(0), y: new Array(chartDataPoints).fill(0), z: new Array(chartDataPoints).fill(0) };
+        let gyroData = { x: new Array(chartDataPoints).fill(0), y: new Array(chartDataPoints).fill(0), z: new Array(chartDataPoints).fill(0) };
+
         function initCharts() {
             if(!document.getElementById('accelChart')) return;
             const commonOptions = {
                 responsive: true, maintainAspectRatio: false, animation: false,
                 elements: { point: { radius: 0 }, line: { borderWidth: 1.5, tension: 0.4 } },
-                scales: { x: { display: false }, y: { display: true, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: 'rgba(255,255,255,0.3)', font: { size: 9 } } } },
+                scales: { 
+                    x: { display: false }, 
+                    y: { 
+                        display: true, 
+                        grid: { color: 'rgba(255,255,255,0.05)' }, 
+                        ticks: { color: 'rgba(255,255,255,0.3)', font: { size: 9 } } 
+                    } 
+                },
                 plugins: { legend: { display: false } }
             };
-            const labels = Array.from({length: 100}, (_, i) => i);
-            const genData = (base, var1) => labels.map(i => base + Math.sin(i/5) * var1 + (Math.random()-0.5)*var1*0.5);
+            const labels = Array.from({length: chartDataPoints}, (_, i) => i);
 
-            new Chart(document.getElementById('accelChart').getContext('2d'), {
-                type: 'line', data: { labels: labels, datasets: [ { borderColor: '#ef4444', data: genData(0, 2) }, { borderColor: '#22c55e', data: genData(9.8, 1) }, { borderColor: '#3b82f6', data: genData(0, 1.5) } ] }, options: commonOptions
+            accelChart = new Chart(document.getElementById('accelChart').getContext('2d'), {
+                type: 'line', 
+                data: { 
+                    labels: labels, 
+                    datasets: [ 
+                        { borderColor: '#ef4444', data: accelData.x }, 
+                        { borderColor: '#22c55e', data: accelData.y }, 
+                        { borderColor: '#3b82f6', data: accelData.z } 
+                    ] 
+                }, 
+                options: commonOptions
             });
-            new Chart(document.getElementById('gyroChart').getContext('2d'), {
-                type: 'line', data: { labels: labels, datasets: [ { borderColor: '#ef4444', data: genData(0, 0.5) }, { borderColor: '#22c55e', data: genData(0, 0.2) }, { borderColor: '#3b82f6', data: genData(0, 0.8) } ] }, options: commonOptions
+            gyroChart = new Chart(document.getElementById('gyroChart').getContext('2d'), {
+                type: 'line', 
+                data: { 
+                    labels: labels, 
+                    datasets: [ 
+                        { borderColor: '#ef4444', data: gyroData.x }, 
+                        { borderColor: '#22c55e', data: gyroData.y }, 
+                        { borderColor: '#3b82f6', data: gyroData.z } 
+                    ] 
+                }, 
+                options: commonOptions
             });
+        }
+
+        function updateCharts(accX, accY, accZ, gyroX, gyroY, gyroZ) {
+            if (!accelChart || !gyroChart) return;
+            
+            // Shift data
+            accelData.x.shift(); accelData.x.push(accX);
+            accelData.y.shift(); accelData.y.push(accY);
+            accelData.z.shift(); accelData.z.push(accZ);
+            
+            gyroData.x.shift(); gyroData.x.push(gyroX);
+            gyroData.y.shift(); gyroData.y.push(gyroY);
+            gyroData.z.shift(); gyroData.z.push(gyroZ);
+            
+            // Update charts
+            accelChart.update();
+            gyroChart.update();
         }
     </script>
 </body>
