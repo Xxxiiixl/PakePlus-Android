@@ -912,6 +912,7 @@
                     map.setView([currentLat, currentLng], 19);
                     latlngs = [[currentLat, currentLng]];
                     trajectoryPolyline.setLatLngs(latlngs);
+                    if (currentMarker) currentMarker.setLatLng([currentLat, currentLng]);
                 }, () => {
                     // Fallback to last known history location if available
                     if (historyData.length > 0) {
@@ -923,9 +924,10 @@
                             map.setView([currentLat, currentLng], 19);
                             latlngs = [[currentLat, currentLng]];
                             trajectoryPolyline.setLatLngs(latlngs);
+                            if (currentMarker) currentMarker.setLatLng([currentLat, currentLng]);
                         }
                     }
-                }, {enableHighAccuracy: true});
+                }, {enableHighAccuracy: true, timeout: 5000});
             } else if (latlngs.length === 0) {
                 latlngs = [[currentLat, currentLng]];
             }
@@ -969,17 +971,16 @@
         }
 
         function getRotationMatrix(alpha, beta, gamma) {
-            // Converts Euler angles to Rotation Matrix
+            // Converts Euler angles to Rotation Matrix (W3C standard)
             const deg2rad = Math.PI / 180;
-            const a = alpha * deg2rad, b = beta * deg2rad, c = gamma * deg2rad;
-            const cA = Math.cos(a), sA = Math.sin(a);
-            const cB = Math.cos(b), sB = Math.sin(b);
-            const cC = Math.cos(c), sC = Math.sin(c);
-            // Z-X-Y order based on W3C DeviceOrientation spec
+            const cX = Math.cos(beta * deg2rad), sX = Math.sin(beta * deg2rad);
+            const cY = Math.cos(gamma * deg2rad), sY = Math.sin(gamma * deg2rad);
+            const cZ = Math.cos(alpha * deg2rad), sZ = Math.sin(alpha * deg2rad);
+            
             return [
-                [cA*cC - sA*sB*sC, -cA*sC - sA*sB*cC, -sA*cB],
-                [sA*cC + cA*sB*sC, -sA*sC + cA*sB*cC,  cA*cB],
-                [-cB*sC,            cB*cC,             sB   ]
+                [cZ * cY - sZ * sX * sY, -cX * sZ, cY * sZ * sX + cZ * sY],
+                [cY * sZ + cZ * sX * sY, cZ * cX, sZ * sY - cZ * cY * sX],
+                [-cX * sY, sX, cX * cY]
             ];
         }
 
@@ -1024,30 +1025,28 @@
                     updateCharts(ax, ay, az, gx, gy, gz);
                 }
                 
-                // 2. 姿态解算 & 转换到导航坐标系 (Navigation Frame)
+                // 2. 姿态解算 (Navigation Frame) - 仅供水平/航向参考
                 let R = getRotationMatrix(euler.alpha, euler.beta, euler.gamma);
                 let a_earth_x = R[0][0]*ax + R[0][1]*ay + R[0][2]*az;
                 let a_earth_y = R[1][0]*ax + R[1][1]*ay + R[1][2]*az;
-                let a_earth_z = R[2][0]*ax + R[2][1]*ay + R[2][2]*az;
-                
-                // 计算垂向加速度与水平加速度
-                let a_vert = Math.abs(a_earth_z / 9.81); 
                 let a_horiz = Math.sqrt(a_earth_x*a_earth_x + a_earth_y*a_earth_y) / 9.81;
                 
-                let vaccelElem = document.getElementById('posture-vaccel');
-                if (vaccelElem) vaccelElem.innerText = a_vert.toFixed(2);
+                // 计算合加速度幅值 (不受手机姿态影响，最鲁棒的步伐检测依据)
+                let a_mag = Math.sqrt(ax*ax + ay*ay + az*az) / 9.81;
                 
-                // 记录水平加速度的最值 (用于水平加速度模型)
+                let vaccelElem = document.getElementById('posture-vaccel');
+                if (vaccelElem) vaccelElem.innerText = a_mag.toFixed(2);
+                
+                // 记录加速度的最值 (用于步长模型)
                 if (a_horiz > aHorizMax) aHorizMax = a_horiz;
                 if (a_horiz < aHorizMin) aHorizMin = a_horiz;
 
-                // 记录垂向加速度的最值 (用于Weinberg/Kim模型)
-                if (a_vert > aVertMax) aVertMax = a_vert;
-                if (a_vert < aVertMin) aVertMin = a_vert;
+                if (a_mag > aVertMax) aVertMax = a_mag;
+                if (a_mag < aVertMin) aVertMin = a_mag;
 
                 let now = Date.now();
-                // 3. 改进的步伐检测 (基于转换后的垂向加速度)
-                if (a_vert > stepThreshold && lastAccelZ <= stepThreshold && (now - lastStepTime) > 300) {
+                // 3. 改进的步伐检测 (基于合加速度幅值，彻底解决手机姿态导致的失效)
+                if (a_mag > stepThreshold && lastAccelZ <= stepThreshold && (now - lastStepTime) > 300) {
                     steps++;
                     
                     // 计算步频
@@ -1111,7 +1110,7 @@
                     aHorizMax = -999; aHorizMin = 999;
                     lastStepTime = now;
                 }
-                lastAccelZ = a_vert;
+                lastAccelZ = a_mag;
             }
         }
 
